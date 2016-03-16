@@ -29,8 +29,6 @@
 (defmacro defcom (head &rest forms)
    `(defcommand ,head ,@(quote-list forms)))
 
-(load "dnd-module.cl")
-
 ;; WARNING! psychotic code - approach with caution
 
 (defun mushy-eval (command-str &optional source destination)
@@ -88,39 +86,6 @@
                (setf res (push form res)))
             (t nil)) res))
 
-(defclass node () (
-   (above :initform nil :accessor above)
-   (folder? :initform nil :accessor folder?)
-   (name :initform "" :accessor data)
-   (sub-nodes :initform nil :accessor subs)))
-
-(defun new-folder (name)
-   (let ((n (make-instance 'node)))
-      (setf (data n) name)
-      (setf (folder? n) t)
-      n))
-
-(defun new-idea (name)
-   (let ((n (make-instance 'node)))
-      (setf (data n) name)
-      (setf (folder? n) nil)
-      n))
-
-(defun add-sub (node-a node-b)
-   (setf (above node-b) node-a)
-   (push node-b (subs node-a)))
-
-(defun getsub (node name)
-   (if (equalp name "..") 
-      (above node)
-      (find name (subs node) :key #'data :test #'equalp)))
-
-(defvar *ideas* (new-folder "root"))
-(defvar *cwd* *ideas*)
-
-(defun format-node (node)
-   (format nil "~a~a" (data node) (if (folder? node) "/" "")))
-
 (defun auth (dst)
    (member dst *members* :test #'equalp))
 
@@ -137,17 +102,11 @@
       (sleep 0.4)))
 
 (defun save-data ()
-   (store *ideas* "idea-db")
-   (store *cwd* "cwd")
-   (store players "players")
    (store *harm* "harm")
    (store *members* "members-db")
    "data saved")
 
 (defun load-data ()
-   (setf *ideas* (restore "idea-db"))
-   (setf players (restore "players"))
-   (setf *cwd* (restore "cwd"))
    (setf *harm* (restore "harm"))
    (setf *members* (restore "members-db"))
    "data loaded")
@@ -161,35 +120,6 @@
 
 (defun clean (str)
    (string-trim '(#\Space #\Tab #\Newline) str))
-
-(defun value- (s)
-   (if s 1 0))
-
-(defun sort-nodes (list)
-   (sort (sort list (lambda (x xs) (string< (data x) (data xs)))) 
-      (lambda (x xs) (> (value- (folder? x)) (value- (folder? xs))))))
-
-(defun resolve-path (str)
-   (let ((wd *cwd*))
-      (setf str (split "\\/" str))
-      (if (eq str nil) (return-from resolve-path nil))
-      (if (equalp (car str) "") (progn (setf wd *ideas*) (setf str (cdr str))))
-      (iter (for x in str)
-         (setf wd (getsub wd x))
-         (if (eq wd nil) (return-from resolve-path nil)))
-      wd))
-
-(defun format-list (list)
-   (if list 
-      (format nil ":: ~a~%~{~a~^~%~}" (data (above (car list))) (mapcar #'format-node (sort-nodes list)))
-      nil))
-
-(defun handle-list (path)
-   (setf path (clean path))
-   (format t "#~a#" path)
-   (if (equalp path "nil")
-      (progn (print "no path found") (subs *cwd*))
-      (subs (aif (resolve-path path) it (return-from handle-list nil)))))
 
 (defcom "\\.bots"
    ((".*") (send "Reporting in! [Common Lisp]" dest)))
@@ -216,11 +146,6 @@ Type (new <character name>) to start a new character on the D&D module." src))
    ((".eval " exp) (is-auth (send (ignore-errors (write-to-string (eval (read-from-string %exp)))) dest)))
    ((".% " exp) (is-auth (send (ignore-errors (write-to-string (eval (read-from-string %exp)))) dest)))
    ((".authorize " nick) (is-auth (push %nick *members*)))
-   ((".mkdir " name) (is-auth (add-sub *cwd* (new-folder %name))))
-   ((".idea " name) (is-auth (add-sub *cwd* (new-idea %name))))
-   ((".ls" (optional path)) (is-auth (send (format-list (handle-list %path)) dest)))
-   ((".cd " path) (is-auth (aif (resolve-path (clean %path)) (setf *cwd* it) (send "Invalid path." dest))))
-   ((".up") (is-auth (setf *cwd* (above *cwd*))))
    ((".cute " nick) (send (format nil (nth (random (length *cute*)) *cute*) %nick) dest)))
 
 (defcom "%add-harmful" (("%add-harmful " software) (harmful %software)))
@@ -240,10 +165,6 @@ Type (new <character name>) to start a new character on the D&D module." src))
       (progn 
          (mushy-eval (format nil "%~a" %exp) src dest)
          (mushy-eval (format nil "$~a" %exp) src dest))))
-
-(defcom "\\[" 
-   (("\\[" exp "\\]")
-         (mushy-eval (format nil "#! ~a" %exp) src dest)))
 
 (defcom "{" 
    (("{" exp "}")
@@ -272,10 +193,3 @@ Type (new <character name>) to start a new character on the D&D module." src))
    (print "errored out, starting loop again")
    (sleep 2)
    (read-message-loop *connection*))
-
-
-
-
-
-
-
