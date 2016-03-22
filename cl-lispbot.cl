@@ -1,90 +1,76 @@
 (proclaim '(optimize (speed 0) (safety 3) (debug 3) (space 0)))
 ;;(declaim #+sbcl(sb-ext:muffle-conditions style-warning))
-(ql:quickload '(alexandria iterate cl-ppcre cl-store anaphora cl-irc trivial-shell cl-json))
-(defpackage cl-ircbot
-   (:use cl alexandria iterate cl-ppcre cl-store anaphora cl-irc cl-json trivial-shell))
-(in-package cl-ircbot)
+(ql:quickload '(alexandria iterate parmesan cl-ppcre cl-store anaphora cl-irc trivial-shell cl-json))
+(defpackage lispbot
+ (:use cl alexandria iterate parmesan cl-ppcre cl-store anaphora cl-irc cl-json trivial-shell))
+(in-package lispbot)
 
 (make-random-state)
 
 (defvar *connection* nil)
 (defvar *nickname* "lispbot")
 (defvar *members* '("Arathnim"))
-(defvar *commands* nil)
-(defvar matched-symbols nil)
+(defvar src nil)
+(defvar dest nil)
+(defvar *env* (make-hash-table :test #'equalp))
 
-(defun single-quote-reader (stream char)
-   (declare (ignore char))
-   `(gethash ',(read stream t nil t) matched-symbols))
+(defparser parse-sym (aif (many+ (choice letter sym)) (intern (string-upcase it))))
+(defparser parse-int (aif (many+ digit) (parse-integer it)))
+(defparser quoted    (between "\"" (many (choice (if (par "\\\"") "\"") (none-of "\""))) "\""))
+(defparser term      (between (many whitespace) choice quoted parse-sym parse-int sexp (many whitespace)))
+(defparser sexp      (between (many whitespace) (between "(" (sep-many term) ")") (many whitespace)))
 
-(set-macro-character #\% #'single-quote-reader)
+(defun defcommand (name type arg-count handler)
+	(setf (gethash name *env*) (list type arg-count handler)))
 
-(defun defcommand (head &rest forms)
-   (push (list head forms) *commands*)
-   "command form added")
+(defun eval-command (form)
+	(if (listp form) 
+		 (let ((def (gethash (car form) *env*)))
+				(if def
+					(case (car def)
+						(function 
+							(if (eql (second def) (length (cdr form)))
+								 (apply (third def) (mapcar #'eval-command (cdr form)))
+								 (format nil "bad number of arguments to ~a, expected ~a" (car form) (second def))))
+						(special
+							(apply (third def) (cdr form))))
+					(format nil "error: unknown symbol ~a" (car form))))
+		 (if (symbolp form)
+			  (aif (gethash form *env*) it (format nil "error: unknown symbol ~a" form))
+			  form)))
 
-(defun quote-list (lst)
-   (mapcar (lambda (x) (car `(',x))) lst))
+(defmacro defunc (name ll &rest body)
+	`(defcommand ',name 'function ',(length ll)
+		(lambda ,ll ,@body)))
 
-(defmacro defcom (head &rest forms)
-   `(defcommand ,head ,@(quote-list forms)))
+(defmacro defspec (name ll &rest body)
+	`(defcommand ',name 'special ',(length ll)
+		(lambda ,ll ,@body)))
 
-;; WARNING! psychotic code - approach with caution
+(defunc test (x)
+	(format nil "it works! [~a]" x))
 
-(defun mushy-eval (command-str &optional source destination)
-   (setf command-str (string-trim '(#\Space #\Tab #\Newline) command-str))
-   (let* ((command (find-head command-str)) 
-          (forms (cadr command))
-          (form nil) (matches nil) (symbols nil)
-          (matched-symbols (make-hash-table :test 'eq)))
-      (block outer 
-         (loop for f in forms do
-            (multiple-value-bind (a b) 
-               (scan-to-strings (convert-form f) command-str)
-                  (if a (progn 
-                     (setf matches b form f symbols (collect-symbols (car f)))
-                     (return-from outer nil))))))
-      (if (not form) (return-from mushy-eval 
-         "Can't match your command form."))
-      (if (and symbols (not (equalp matches #()))) 
-         (loop for s in symbols for m across matches do
-         (setf (gethash s matched-symbols) m)))
-      (let ((src source) (dest destination))
-         (declare (special src))
-         (declare (special dest))
-         (declare (special matched-symbols))
-         (eval (cadr form)))))
+(defunc + (x y) (+ x y))
+(defunc - (x y) (- x y))
+(defunc * (x y) (* x y))
+(defunc / (x y) (/ x y))
 
-(defun convert-head (head)
-   (format nil "^~a" head))
+(defunc eql (x y) (equalp x y))
 
-(defun find-head (command)
-   (loop for c in *commands* do
-      (if (all-matches (convert-head (car c)) command)
-         (return-from find-head c))))
+(defunc src () src)
+(defunc dest () dest)
 
-(defun convert-form (form)
-   (setf form (car form))
-   (format nil "^~a$"
-      (build-regex form)))
+(defspec if (pred a &optional b)
+	(if a b))
 
-(defun build-regex (elt)
-   (cond ((stringp elt) elt)
-         ((symbolp elt) "(.+?)")
-         ((eq (car elt) 'optional) 
-            (format nil "~{(?:~a)?~}" (mapcar #'build-regex (cdr elt))))
-         ((eq (car elt) 'switch) 
-            (format nil "(?:~{~a~^|~})" (mapcar #'build-regex (cdr elt))))
-         ((listp elt) (format nil "~{~a~}" (mapcar #'build-regex elt)))
-         (t (error "Invalid element in command declaration:~a" elt))))
+(defunc string (str) 
+	(string-downcase (string str)))
 
-(defun collect-symbols (form)
-   (let ((res nil))
-      (cond ((listp form) 
-         (setf res (alexandria:flatten (mapcar #'collect-symbols form))))
-            ((and (symbolp form) (not (eq form 'optional)) (not (eq form 'switch))) 
-               (setf res (push form res)))
-            (t nil)) res))
+(defunc cute (nick) 
+	(format nil (nth (random (length *cute*)) *cute*) nick))
+
+(defun read-command (str)
+	(parse str (sexp)))
 
 (defun auth (dst)
    (member dst *members* :test #'equalp))
@@ -102,12 +88,10 @@
       (sleep 0.4)))
 
 (defun save-data ()
-   (store *harm* "harm")
    (store *members* "members-db")
    "data saved")
 
 (defun load-data ()
-   (setf *harm* (restore "harm"))
    (setf *members* (restore "members-db"))
    "data loaded")
 
@@ -121,11 +105,20 @@
 (defun clean (str)
    (string-trim '(#\Space #\Tab #\Newline) str))
 
-(defcom "\\.bots"
-   ((".*") (send "Reporting in! [Common Lisp]" dest)))
+(defun msg-hook (message)
+   (let ((dest* 
+            (if (string-equal (first (arguments message)) *nickname*)
+               (source message)
+               (first (arguments message))))
+         (src* (source message))
+         (data (car (last (arguments message)))))
+			(setf dest dest* src src*)
+   	   (if (read-command data)
+				 (let ((res (eval-command (read-command data))))
+						(if (not (equalp res ""))
+							 (send (format nil "~a" res) dest))))
+   (finish-output)))
 
-(defun harmful (&rest harmful-things) (iter (for x in harmful-things) (push x *harm*)) "harmful software added.")
-(defvar *harm* '("GCC" "make" "autoconf" "automake" "C" "XML" "F#" "C#" "Java" "clojure" "JS" "C++" "web" "harmful"))
 (defvar *cute* '(
    "(✿◠‿◠)っ~~ ♥ ~a"
    "⊂◉‿◉つ ❤ ~a"
@@ -135,50 +128,6 @@
    "~a (´ε｀ )♡"
    "(⊃｡•́‿•̀｡)⊃ U GONNA GET HUGGED ~a"
    "( ＾◡＾)っ~~ ❤ ~a"))
-
-(defcom "%"
-   ((".neko") (send (nth (random 3) '("mew ฅ^•ﻌ•^ฅ" "meow (^・ω・^ )" "nyaa (=^･^=)")) dest))
-   ((".help") 
-      (send "I keep track of ideas and evaluate lisp expressions!  Use 'whoami' to see if you're authorized to evaluate things. Other commands include eval, authorize, whoami, and add-harmful.
-Type (new <character name>) to start a new character on the D&D module." src))
-   ((".whoami") (send (if (auth src) "You're authorized!" "You're unauthorized, and likely to be eaten by a grue.") dest))
-   ((".exit") (is-auth (sb-ext:exit)))
-   ((".eval " exp) (is-auth (send (ignore-errors (write-to-string (eval (read-from-string %exp)))) dest)))
-   ((".% " exp) (is-auth (send (ignore-errors (write-to-string (eval (read-from-string %exp)))) dest)))
-   ((".authorize " nick) (is-auth (push %nick *members*)))
-   ((".cute " nick) (send (format nil (nth (random (length *cute*)) *cute*) %nick) dest)))
-
-(defcom "%add-harmful" (("%add-harmful " software) (harmful %software)))
-(defcom "%harmful" ((".*") (send (format nil "~a considered harmful" (nth (random (length *harm*)) *harm*)) dest)))
-
-(defcom "%ud"
-   ((".ud " term) (send (ud %term) dest)))
-
-(defcom "(ld)|(cd)" 
-   (("(ld)") (send "This isn't a shell, dummy!" dest)))
-
-(defcom "#!"
-   (("#! " command) (is-auth (send (clean (shell-command %command)) dest))))
-
-(defcom "\\(" 
-   (("\\(" exp "\\)") 
-      (progn 
-         (mushy-eval (format nil "%~a" %exp) src dest)
-         (mushy-eval (format nil "$~a" %exp) src dest))))
-
-(defcom "{" 
-   (("{" exp "}")
-         (mushy-eval (format nil "(eval (~a))" %exp) src dest)))
-
-(defun msg-hook (message)
-   (let ((dest 
-            (if (string-equal (first (arguments message)) *nickname*)
-               (source message)
-               (first (arguments message))))
-         (src (source message))
-         (data (car (last (arguments message)))))
-   (mushy-eval data src dest)
-   (finish-output)))
 
 (defun notice-hook (m)
    (print m)
