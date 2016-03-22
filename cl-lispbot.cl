@@ -17,7 +17,7 @@
 (defparser parse-sym (aif (many+ (choice letter sym)) (intern (string-upcase it))))
 (defparser parse-int (aif (many+ digit) (parse-integer it)))
 (defparser quoted    (between "\"" (many (choice (if (par "\\\"") "\"") (none-of "\""))) "\""))
-(defparser term      (between (many whitespace) choice quoted parse-sym parse-int sexp (many whitespace)))
+(defparser term      (between (many whitespace) (choice quoted parse-sym parse-int sexp) (many whitespace)))
 (defparser sexp      (between (many whitespace) (between "(" (sep-many term) ")") (many whitespace)))
 
 (defun defcommand (name type arg-count handler)
