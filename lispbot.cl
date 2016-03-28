@@ -7,6 +7,16 @@
 
 (make-random-state)
 
+(defvar *cute* '(
+   "(✿◠‿◠)っ~~ ♥ ~a"
+   "⊂◉‿◉つ ❤ ~a"
+   "( ´・‿-) ~~ ♥ ~a"
+   "(っ⌒‿⌒)っ~~ ♥ ~a"
+   "ʕ´•ᴥ•`ʔσ” BEARHUG ~a"
+   "~a (´ε｀ )♡"
+   "(⊃｡•́‿•̀｡)⊃ U GONNA GET HUGGED ~a"
+   "( ＾◡＾)っ~~ ❤ ~a"))
+
 (defvar *connection* nil)
 (defvar *nickname* "lispbot")
 (defvar *members* '("Arathnim"))
@@ -14,7 +24,7 @@
 (defvar dest nil)
 (defvar *env* (make-hash-table :test #'equalp))
 
-(defparser parse-sym (aif (many+ (choice letter sym)) (intern (string-upcase it))))
+(defparser parse-sym (aif (many+ (choice letter sym)) (intern it)))
 (defparser parse-int (aif (many+ digit) (parse-integer it)))
 (defparser quoted    (between "\"" (many (choice (if (par "\\\"") "\"") (none-of "\""))) "\""))
 (defparser term      (between (many whitespace) (choice quoted parse-sym parse-int sexp) (many whitespace)))
@@ -25,7 +35,7 @@
 
 (defun eval-command (form)
 	(if (listp form) 
-		 (let ((def (gethash (car form) *env*)))
+		 (let ((def (gethash (string (car form)) *env*)))
 				(if def
 					(case (car def)
 						(function 
@@ -36,15 +46,15 @@
 							(apply (third def) (cdr form))))
 					(format nil "error: unknown symbol ~a" (car form))))
 		 (if (symbolp form)
-			  (aif (gethash form *env*) it (format nil "error: unknown symbol ~a" form))
+			  (aif (gethash (string form) *env*) it (format nil "error: unknown symbol ~a" form))
 			  form)))
 
 (defmacro defunc (name ll &rest body)
-	`(defcommand ',name 'function ',(length ll)
+	`(defcommand ',(string name) 'function ',(length ll)
 		(lambda ,ll ,@body)))
 
 (defmacro defspec (name ll &rest body)
-	`(defcommand ',name 'special ',(length ll)
+	`(defcommand ',(string name) 'special ',(length ll)
 		(lambda ,ll ,@body)))
 
 (defunc test (x)
@@ -66,8 +76,13 @@
 (defunc string (str) 
 	(string-downcase (string str)))
 
-(defunc cute (nick) 
-	(format nil (nth (random (length *cute*)) *cute*) nick))
+(defspec cute (nick)
+	(print nick)
+	(format nil (nth (random (length *cute*)) *cute*) (string nick)))
+
+(defspec join (channel)
+	(progn (join *connection* (string-downcase (string channel)))
+		    nil))
 
 (defun read-command (str)
 	(parse str (sexp)))
@@ -114,20 +129,12 @@
          (data (car (last (arguments message)))))
 			(setf dest dest* src src*)
    	   (if (read-command data)
-				 (let ((res (eval-command (read-command data))))
-						(if (not (equalp res ""))
-							 (send (format nil "~a" res) dest))))
+				 (if (gethash (string (car (read-command data))) *env*)
+					(let ((res (eval-command (read-command data))))
+					 (print (read-command data))
+					 (if (not (equalp res ""))
+						  (send (format nil "~a" res) dest)))))
    (finish-output)))
-
-(defvar *cute* '(
-   "(✿◠‿◠)っ~~ ♥ ~a"
-   "⊂◉‿◉つ ❤ ~a"
-   "( ´・‿-) ~~ ♥ ~a"
-   "(っ⌒‿⌒)っ~~ ♥ ~a"
-   "ʕ´•ᴥ•`ʔσ” BEARHUG ~a"
-   "~a (´ε｀ )♡"
-   "(⊃｡•́‿•̀｡)⊃ U GONNA GET HUGGED ~a"
-   "( ＾◡＾)っ~~ ❤ ~a"))
 
 (defun notice-hook (m)
    (print m)
