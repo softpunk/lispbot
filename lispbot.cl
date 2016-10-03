@@ -4,16 +4,16 @@
 (setf *print-case* :downcase)
 (with-open-file
 	(*standard-output* "/dev/null" :direction :output :if-exists :supersede)
-		(ql:quickload '(alexandria cl-ppcre iterate anaphora cl-irc cl-json trivial-shell)))
+		(ql:quickload '(alexandria cl-ppcre iterate anaphora cl-irc)))
 
 (defpackage lispbot
- (:use cl alexandria iterate cl-ppcre anaphora cl-irc cl-json trivial-shell))
+ (:use cl alexandria iterate cl-ppcre anaphora cl-irc))
 (in-package lispbot)
 
 (setf *read-eval* nil)
 (make-random-state)
 
-(defvar *cute* '(
+(defconstant *cute1* '(
    "(✿◠‿◠)っ~~ ♥ ~a"
    "⊂◉‿◉つ ❤ ~a"
    "( ´・‿-) ~~ ♥ ~a"
@@ -23,6 +23,13 @@
    "(⊃｡•́‿•̀｡)⊃ U GONNA GET HUGGED ~a"
    "( ＾◡＾)っ~~ ❤ ~a"))
 
+(defconstant *cute2* '(
+	"~a ~~(=^･ω･^)ヾ(^^ ) ~a"
+	"~a (◎｀・ω・´)人(´・ω・｀*) ~a"
+	"~a (*´・ω・)ノ(-ω-｀*) ~a"
+	"~a (ɔ ˘⌣˘)˘⌣˘ c) ~a"
+	"~a (◦˘ З(◦’ںˉ◦)♡ ~a"))
+
 (defvar *connection* nil)
 (defvar *nickname* "lispbot")
 (defvar *members* '("Arathnim"))
@@ -31,26 +38,22 @@
 (defvar src nil)
 (defvar dest nil)
 
+(defun clean (str)
+   (string-trim '(#\Space #\Tab #\Newline) str))
+
 (defmacro is-auth (exp)
    `(when (auth src) ,exp))
 
-(defun eval-command (form)
-	(if (and (listp form) (member (car form) *commands*)) 
-		 (apply (car form) (cdr form))
-		 (is-auth (ignore-errors (eval form)))))
-
 (defun cute (nick)
-	(format nil (nth (random (length *cute*)) *cute*) (format nil "~a" nick)))
+	(let* ((n (eql 1 (random 2))) (cuteset (if n *cute1* *cute2*)) (length (length (if n *cute1* *cute2*)))
+		 	 (f (nth (random length) cuteset))) 
+			 (if n 
+				  (format nil f (format nil "~a" nick))
+				  (format nil f (format nil "~a" nick) (format nil "~a" src)))))
 
 (defun join-channel (channel)
-	(progn (join *connection* (string-downcase (string channel)))
-		    nil))
-
-(defun read-command (str)
-	(ignore-errors (read-from-string (clean str))))
-
-(defun auth (dst)
-   (member dst *members* :test #'equalp))
+	(progn (join *connection* channel)
+	       nil))
 
 (defun catstr (&rest rest)
    (format nil "~{~a~}" rest))
@@ -59,46 +62,85 @@
    (format nil (catstr "~{~<~%~1," length ":;~A~> ~}")
       (split " " string)))
 
+(defun stringify (s)
+	(if (symbolp s)
+		 (string s)
+		 s))
+
+(defun sym-downcase (s) (string-downcase (string s)))
+
 (defun send (msg dst)
    (iter (for x in (split "\\n" (wrap-to 100 msg)))
       (privmsg *connection* dst x)
       (sleep 0.4)))
 
-(defun ud (term)
-   (let ((json (decode-json-from-string (shell-command (format nil "curl 'api.urbandictionary.com/v0/define?term=~a'" term)))))
-		(print json)
-      (cdr (fifth (second (third json)))))) ;; second is where the nth should go
+(defmacro strip-to-capture-group (regex str)
+	(with-gensyms (a) `(register-groups-bind (,a) (,regex ,str) ,a)))
 
-(defun clean (str)
-   (string-trim '(#\Space #\Tab #\Newline) str))
+(defun parse-command (str)
+	(or (let ((l (split ",," str))) 
+				 (when (not (eql (length l) 1)) (second l)))
+		 (strip-to-capture-group "^ *,(.*)" str)
+		 (strip-to-capture-group (format nil "^~a:(.*)" *nickname*) str)))
+
+;; TODO replace with list of functions, send the result given by the first that matches
+(defparameter commands (make-hash-table :test #'equalp))
+
+(defmacro defcommand (name ll &rest body)
+	`(setf (gethash ,(string-downcase name) commands) (lambda ,ll ,@body)))
+
+(defcommand cute (args)
+	(if (not (first args))
+		 "I don't know who you want me to cute!" 
+		 (cute (stringify (first args)))))
+
+(defun lispify (str)
+	(let ((r nil)) 
+			(setf (readtable-case *readtable*) :preserve)
+	 		(setf r
+				(if (eql (char str 0) #\()
+				    (read-from-string str)
+				    (read-from-string (concatenate 'string "(" str ")"))))
+			(setf (readtable-case *readtable*) :upcase)
+			r))
+
+(defun command-handler (str)
+	(when (not (equalp str ""))
+			(let* ((form (lispify str)) (command (gethash (string-downcase (car form)) commands)))
+					 (if (not command)
+						  (send (format nil "I don't know the term '~a'" (string-downcase (car form))) dest)
+						  (send (funcall command (cdr form)) dest)))))
 
 (defun msg-hook (message)
-   (let ((dest* 
-            (if (string-equal (first (arguments message)) *nickname*)
-                (source message)
-                (first (arguments message))))
+   (let ((dest* (if (string-equal (first (arguments message)) *nickname*)
+                	  (source message)
+                	  (first (arguments message))))
          (src* (source message))
          (data (car (last (arguments message)))))
 			(setf dest dest* src src*)
-			(let ((parsed-command (read-command data)))
-					(when (and parsed-command (listp parsed-command) (not (member src *ignored* :test #'equalp)))
-				   (let ((res (eval-command parsed-command)))
-					      (when res
-									(when (not (stringp res)) (setf res (format nil "~a" res)))
-						 		 	(send (format nil "~a" res) dest)))))
+			(awhen (and (not (member src *ignored* :test #'equalp)) 
+							(or (unless (eql (char dest 0) #\#) data) (parse-command data)))
+			       (command-handler (clean it)))
    (finish-output)))
 
 (defun notice-hook (m)
    (print m)
    (finish-output))
 
-;; irc.rizon.net
-(setf *connection* (connect :nickname *nickname* :server "irc.rizon.net"))
-(add-hook *connection* 'irc-privmsg-message #'msg-hook)
-(add-hook *connection* 'irc-notice-message #'notice-hook)
+(defun set-server (name)
+	(setf *connection* (connect :nickname *nickname* :server name))
+	(add-hook *connection* 'irc-privmsg-message #'msg-hook)
+   (add-hook *connection* 'irc-notice-message #'notice-hook))
 
-(read-message-loop *connection*)
-(iter
- (print "errored out, starting loop again")
- (sleep 2)
- (read-message-loop *connection*))
+(defun start-irc ()
+	(sb-thread:make-thread 'main-irc-loop :name "irc"))
+
+;; (set-server "irc.rizon.net")
+
+(defun main-irc-loop ()
+	(read-message-loop *connection*)
+ 	(iter
+  		(print "errored out, starting loop again")
+  		(sleep 2)
+  		(read-message-loop *connection*)))
+
