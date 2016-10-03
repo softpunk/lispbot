@@ -39,9 +39,6 @@
 (defun clean (str)
    (string-trim '(#\Space #\Tab #\Newline) str))
 
-(defmacro is-auth (exp)
-   `(when (auth src) ,exp))
-
 (defun cute (nick)
 	(let* ((n (eql 1 (random 2))) (cuteset (if n *cute1* *cute2*)) (length (length (if n *cute1* *cute2*)))
 		 	 (f (nth (random length) cuteset))) 
@@ -129,8 +126,12 @@
    (print m)
    (finish-output))
 
+(defun strip-sigil (s)
+	(strip-to-capture-group "[+%@~]?(.+)" s))
+
 (defun namereply-hook (m)
-	(appendf (gethash (third (arguments m)) *channel-list*) (fourth (arguments m))))
+	(appendf (gethash (third (arguments m)) *channel-users*) 
+				(mapcar #'strip-sigil (split " " (fourth (arguments m))))))
 
 (defun set-server (name)
 	(setf *connection* (connect :nickname *nickname* :server name))
@@ -138,7 +139,9 @@
 	(add-hook *connection* 'irc-rpl_namreply-message #'namereply-hook)
    (add-hook *connection* 'irc-notice-message #'notice-hook))
 
-(defun start-irc ()
+(defun start-irc (&optional server nick)
+	(when nick (setf *nickname* nick))
+	(when server (set-server server))
 	(sb-thread:make-thread 'main-irc-loop :name "irc"))
 
 (defun main-irc-loop ()
@@ -148,6 +151,5 @@
   		(sleep 2)
   		(read-message-loop *connection*)))
 
-(set-server "irc.rizon.net")
-(sleep 1)
-(start-irc)
+(start-irc "irc.rectilinear.xyz" "lbt")
+
