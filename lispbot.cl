@@ -2,9 +2,7 @@
 ;(declaim #+sbcl(sb-ext:muffle-conditions style-warning))
 ;(declaim #+sbcl(sb-ext:muffle-conditions warning))
 (setf *print-case* :downcase)
-(with-open-file
-	(*standard-output* "/dev/null" :direction :output :if-exists :supersede)
-		(ql:quickload '(alexandria cl-ppcre iterate anaphora cl-irc)))
+(ql:quickload '(alexandria cl-ppcre iterate anaphora cl-irc) :silent t)
 
 (defpackage lispbot
  (:use cl alexandria iterate cl-ppcre anaphora cl-irc))
@@ -32,9 +30,9 @@
 
 (defvar *connection* nil)
 (defvar *nickname* "lispbot")
-(defvar *members* '("Arathnim"))
-(defvar *commands* '(cute join-channel send))
 (defvar *ignored* '("nv" "trinary" "tca" "shinrei"))
+(defvar *channels* nil)
+(defvar *channel-users* (make-hash-table :test #'equalp))
 (defvar src nil)
 (defvar dest nil)
 
@@ -94,6 +92,10 @@
 		 "I don't know who you want me to cute!" 
 		 (cute (stringify (first args)))))
 
+(defcommand sentient? (args)
+	(declare (ignore args))
+	(whichever "nil" "not yet"))
+
 (defun lispify (str)
 	(let ((r nil)) 
 			(setf (readtable-case *readtable*) :preserve)
@@ -127,15 +129,17 @@
    (print m)
    (finish-output))
 
+(defun namereply-hook (m)
+	(appendf (gethash (third (arguments m)) *channel-list*) (fourth (arguments m))))
+
 (defun set-server (name)
 	(setf *connection* (connect :nickname *nickname* :server name))
 	(add-hook *connection* 'irc-privmsg-message #'msg-hook)
+	(add-hook *connection* 'irc-rpl_namreply-message #'namereply-hook)
    (add-hook *connection* 'irc-notice-message #'notice-hook))
 
 (defun start-irc ()
 	(sb-thread:make-thread 'main-irc-loop :name "irc"))
-
-;; (set-server "irc.rizon.net")
 
 (defun main-irc-loop ()
 	(read-message-loop *connection*)
@@ -144,3 +148,6 @@
   		(sleep 2)
   		(read-message-loop *connection*)))
 
+(set-server "irc.rizon.net")
+(sleep 1)
+(start-irc)
