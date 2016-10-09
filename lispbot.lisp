@@ -9,7 +9,7 @@
 (in-package lispbot)
 
 (setf *read-eval* nil)
-(make-random-state)
+(setf *random-state* (make-random-state t))
 
 (defconstant cute1 '(
    "(✿◠‿◠)っ~~ ♥ ~a"
@@ -167,6 +167,8 @@
 ;; give NUMBER/a TYPE cookie(s) to NICK 
 ;; give NICK NUMBER/a TYPE cookie(s)
 (defcommand give (args)
+	(when (< (length args) 4)
+		   (return-from give (whichever "eh?" "sorry, this bot only accpets proper grammer" "pls")))
    (setf args (mapcar #'stringify args))
    (if (is-cookie? (nth-from-end 2 args)) 
        (if (equalp (nth-from-end 1 args) "to")
@@ -228,7 +230,7 @@
 (defcommand help (args)
    (if (not args)
 "You can give me commands by using ',' in a normal channel, or just normally in a pm. 
-A few common commands are cute, cookie, and give. For now, you'll have to figure the
+A few common commands are cute, cookies, and give. For now, you'll have to figure the
 rest out yourself."))
 
 ;; this is a hack
