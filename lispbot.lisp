@@ -2,7 +2,7 @@
 ;(declaim #+sbcl(sb-ext:muffle-conditions style-warning))
 ;(declaim #+sbcl(sb-ext:muffle-conditions warning))
 (setf *print-case* :downcase)
-(ql:quickload '(alexandria cl-store cl-ppcre iterate anaphora cl-irc) :silent t)
+;; (ql:quickload '(alexandria cl-store cl-ppcre iterate anaphora cl-irc) :silent t)
 
 (defpackage lispbot
  (:use cl alexandria cl-store iterate cl-ppcre anaphora cl-irc))
