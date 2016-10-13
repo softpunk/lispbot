@@ -4,5 +4,5 @@
 	:author "Dylan Ball <arathnim@gmail.com>"
 	:maintainer "Dylan Ball <arathnim@gmail.com>"
 	:description "cute irc bot"
-	:depends-on (alexandria cl-store cl-ppcre iterate anaphora cl-irc)
+	:depends-on (alexandria cl-store cl-ppcre iterate anaphora cl-irc destructuring-match)
 	:components ((:file "lispbot")))

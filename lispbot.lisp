@@ -1,17 +1,22 @@
 (proclaim '(optimize (speed 0) (safety 3) (debug 3) (space 0)))
 ;(declaim #+sbcl(sb-ext:muffle-conditions style-warning))
 ;(declaim #+sbcl(sb-ext:muffle-conditions warning))
-(setf *print-case* :downcase)
-;; (ql:quickload '(alexandria cl-store cl-ppcre iterate anaphora cl-irc) :silent t)
+
+;; TODO
+;; [ ] switch over to destructuring-match for give and award
+;; [ ] make a more general inventory system
+;; [ ] note/definition thing
+
+(ql:quickload '(alexandria cl-store iterate cl-ppcre anaphora cl-irc destructuring-match))
 
 (defpackage lispbot
- (:use cl alexandria cl-store iterate cl-ppcre anaphora cl-irc))
+ (:use cl alexandria cl-store iterate cl-ppcre anaphora cl-irc destr-match))
 (in-package lispbot)
 
 (setf *read-eval* nil)
 (setf *random-state* (make-random-state t))
 
-(defconstant cute1 '(
+(defparameter cute1 '(
    "(✿◠‿◠)っ~~ ♥ ~a"
    "⊂◉‿◉つ ❤ ~a"
    "( ´・‿-) ~~ ♥ ~a"
@@ -21,7 +26,7 @@
    "(⊃｡•́‿•̀｡)⊃ U GONNA GET HUGGED ~a"
    "( ＾◡＾)っ~~ ❤ ~a"))
 
-(defconstant cute2 '(
+(defparameter cute2 '(
    "~a ~~(=^･ω･^)ヾ(^^ ) ~a"
    "~a (◎｀・ω・´)人(´・ω・｀*) ~a"
    "~a (*´・ω・)ノ(-ω-｀*) ~a"
@@ -71,8 +76,8 @@
 (defmacro strip-to-capture-group (regex str)
    (with-gensyms (a) `(register-groups-bind (,a) (,regex ,str) ,a)))
 
-(defconstant single-char-trigger ",")
-(defconstant inline-char-trigger ",,")
+(defparameter single-char-trigger ",")
+(defparameter inline-char-trigger ",,")
 
 (defun parse-command (str)
    (or (when inline-char-trigger
@@ -90,7 +95,9 @@
           (lambda ,ll (block ,(intern (string-upcase name)) ,@body))))
 
 (defun cute (nick)
-   (let* ((n (eql 1 (random 2))) (cuteset (if n cute1 cute2)) (length (length (if n cute1 cute2)))
+   (let* ((n (eql 1 (random 2))) 
+		    (cuteset (if n cute1 cute2)) 
+			 (length (length (if n cute1 cute2)))
           (f (nth (random length) cuteset))) 
           (if n 
               (format nil f nick)
@@ -112,7 +119,8 @@
          (if cookie-data
              (cats "You have " (format nil english-list
                 (aif (iter (for (flavor number) in cookie-data)
-                           (if (> number 0) (collect (format nil "~r ~a cookie~p" number flavor number))))
+                           (if (> number 0) 
+										 (collect (format nil "~r ~a cookie~p" number flavor number))))
                      it
                      (return-from cookies "You don't have any cookies ;_;"))))
              "You don't have any cookies ;_;")))
@@ -164,33 +172,19 @@
                  number nick)))
 
 ;; nick-first and nick-last formats
-;; give NUMBER/a TYPE cookie(s) to NICK 
-;; give NICK NUMBER/a TYPE cookie(s)
+;; give NUM TYPE cookie[s] to NICK
+;; give NICK NUM TYPE cookie[s]
+(defmacro quantifier (x) `(key ,x #'number-designator?))
+(defmacro irc-user (n) `(test ,n (lambda (m) (member (car m) *users* :test #'equalp))))
+(defmacro cookie () `(switch "cookie" "cookies"))
 (defcommand give (args)
-	(when (< (length args) 4)
-		   (return-from give (whichever "eh?" "sorry, this bot only accpets proper grammer" "pls")))
-   (setf args (mapcar #'stringify args))
-   (if (is-cookie? (nth-from-end 2 args)) 
-       (if (equalp (nth-from-end 1 args) "to")
-           (aif (number-designator? (first args))
-                (if (member (nth-from-end 0 args) *users* :test #'equalp)
-                    (let ((flavor (subseq args 1 (- (length args) 3))))
-                          (if flavor
-                              (transfer-cookies (nth-from-end 0 args) it (format nil fspaces flavor))
-                              "What kind of cookies?"))
-                    "Who?")
-                "How many cookies?")
-           "What do you want to do with those cookies?")
-       (if (is-cookie? (nth-from-end 0 args))
-           (aif (number-designator? (second args))
-                (if (member (first args) *users* :test #'equalp)
-                    (let ((flavor (subseq args 2 (- (length args) 1))))
-                          (if flavor
-                              (transfer-cookies (first args) it (format nil fspaces flavor))
-                              "What kind of cookies?"))
-                    "Who?")
-                "How many cookies?")
-           "What do you want to give?")))
+	(setf args (mapcar #'stringify args))
+	(or (destructuring-match args
+		   (switch
+			  ((quantifier amount) cookie-type (cookie) "to" (irc-user n))  
+			  ((irc-user n) (quantifier amount) cookie-type (cookie)))     
+		   (transfer-cookies n amount cookie-type))
+	    (whichever "eh?" "sorry, this bot only accpets proper grammer" "pls")))
 
 ;; what would be nice:
 ;; (make-numbered-verb-command give cookie transfer-cookies)
@@ -260,6 +254,17 @@ rest out yourself."))
                               dest)
                              (send (funcall command (cdr form)) dest)))))))
 
+(defun dummy-handler (str)
+   (when (not (equalp str ""))
+         (let ((form (lispify str)))
+               (if (not (listp form))
+                   form
+                   (let ((command (gethash (string-downcase (car form)) commands)))
+                         (if (not command)
+                             (format nil "I don't know the term '~a'" 
+										  (string-downcase (car form)))
+                             (funcall command (cdr form))))))))
+
 (defun msg-hook (message)
    (let ((dest* (if (string-equal (first (arguments message)) *nickname*)
                     (source message)
@@ -300,3 +305,4 @@ rest out yourself."))
       (read-message-loop *connection*)))
 
 (setf (gethash "ara" *user-cookies*) '(("snickerdoodle" 1) ("sugar" 2) ("peanut butter" 3)))
+(setf *users* '("ara" "Arathnim"))
