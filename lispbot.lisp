@@ -7,10 +7,11 @@
 ;; [ ] make a more general inventory system
 ;; [ ] note/definition thing
 
-(ql:quickload '(alexandria cl-store iterate cl-ppcre anaphora cl-irc destructuring-match))
+(ql:quickload '(alexandria cl-store iterate cl-ppcre anaphora cl-irc destructuring-match) :silent t)
 
 (defpackage lispbot
- (:use cl alexandria cl-store iterate cl-ppcre anaphora cl-irc destr-match))
+ (:use cl alexandria cl-store iterate cl-ppcre anaphora cl-irc destr-match)
+ (:shadowing-import-from destr-match switch))
 (in-package lispbot)
 
 (setf *read-eval* nil)
@@ -174,13 +175,13 @@
 ;; nick-first and nick-last formats
 ;; give NUM TYPE cookie[s] to NICK
 ;; give NICK NUM TYPE cookie[s]
-(defmacro quantifier (x) `(key ,x #'number-designator?))
+(defmacro qxuantifier (x) `(key ,x #'number-designator?))
 (defmacro irc-user (n) `(test ,n (lambda (m) (member (car m) *users* :test #'equalp))))
-(defmacro cookie () `(switch "cookie" "cookies"))
+(defmacro cookie () `(choice "cookie" "cookies"))
 (defcommand give (args)
 	(setf args (mapcar #'stringify args))
 	(or (destructuring-match args
-		   (switch
+		   (choice
 			  ((quantifier amount) cookie-type (cookie) "to" (irc-user n))  
 			  ((irc-user n) (quantifier amount) cookie-type (cookie)))     
 		   (transfer-cookies n amount cookie-type))
