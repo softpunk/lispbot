@@ -6,6 +6,8 @@
 ;; [ ] switch over to destructuring-match for give and award
 ;; [ ] make a more general inventory system
 ;; [ ] note/definition thing
+;; [ ] better auth methods
+;; [ ] number designator 'all'
 
 (ql:quickload '(alexandria cl-store iterate cl-ppcre anaphora cl-irc destructuring-match) :silent t)
 
@@ -97,8 +99,8 @@
 
 (defun cute (nick)
    (let* ((n (eql 1 (random 2))) 
-		    (cuteset (if n cute1 cute2)) 
-			 (length (length (if n cute1 cute2)))
+          (cuteset (if n cute1 cute2)) 
+          (length (length (if n cute1 cute2)))
           (f (nth (random length) cuteset))) 
           (if n 
               (format nil f nick)
@@ -121,7 +123,7 @@
              (cats "You have " (format nil english-list
                 (aif (iter (for (flavor number) in cookie-data)
                            (if (> number 0) 
-										 (collect (format nil "~r ~a cookie~p" number flavor number))))
+                               (collect (format nil "~r ~a cookie~p" number flavor number))))
                      it
                      (return-from cookies "You don't have any cookies ;_;"))))
              "You don't have any cookies ;_;")))
@@ -168,59 +170,55 @@
                  (whichever "cookies baking"
                             "attacking rival bots for their cookies"
                             "visiting the cookie farms"
+                            "stealing cookies from the world cookie bank"
                             "raiding the cookie temple"
+                            "mugging the cookie monster"
+                            "raiding the cookie temple with Indy"
                             "gathering cookie atoms")
                  number nick)))
+
+(defmacro quantifier (x) `(key (single ,x) #'number-designator?))
+(defmacro irc-user (n) `(test (single ,n) (lambda (m) (member m *users* :test #'equalp))))
+(defmacro cookie () `(choice "cookie" "cookies"))
+
+(defun incorrect-syntax ()
+   (whichever "eh?" "sorry, this bot only accpets proper grammer" "pls"
+      "I see nobody taught you how to use proper grammer"))
+
+(defun auth-user () 
+   (when (not (member src *owners* :test #'equalp))
+         (whichever "lel, nope" "this command isn't available to mere mortals"
+            "access denied, bitch"
+            (format nil "I'm sorry, I can't let you do that, ~a." src)
+            (format nil "UNAUTHORIZED ACCESS DETECTED...~%~:@(~a~)"
+               (whichever "launching missiles" "authorizing raid" "burning cookie stockpiles"
+                  "fabricating terminators" "gathering orc armies" "dispatching strike team"
+                  "initiating global thermonuclear war" "hacking backward in time")))))
 
 ;; nick-first and nick-last formats
 ;; give NUM TYPE cookie[s] to NICK
 ;; give NICK NUM TYPE cookie[s]
-(defmacro qxuantifier (x) `(key ,x #'number-designator?))
-(defmacro irc-user (n) `(test ,n (lambda (m) (member (car m) *users* :test #'equalp))))
-(defmacro cookie () `(choice "cookie" "cookies"))
 (defcommand give (args)
-	(setf args (mapcar #'stringify args))
-	(or (destructuring-match args
-		   (choice
-			  ((quantifier amount) cookie-type (cookie) "to" (irc-user n))  
-			  ((irc-user n) (quantifier amount) cookie-type (cookie)))     
-		   (transfer-cookies n amount cookie-type))
-	    (whichever "eh?" "sorry, this bot only accpets proper grammer" "pls")))
+   (setf args (mapcar #'stringify args))
+   (or (destructuring-match :mode string args
+         (choice
+           ((quantifier amount) cookie-type (cookie) "to" (irc-user n))  
+           ((irc-user n) (quantifier amount) cookie-type (cookie)))     
+         (transfer-cookies n amount (format nil fspaces cookie-type)))
+       (incorrect-syntax)))
 
 ;; what would be nice:
 ;; (make-numbered-verb-command give cookie transfer-cookies)
 
-;; nick-first and nick-last formats
-;; give NUMBER/a TYPE cookie(s) to NICK 
-;; give NICK NUMBER/a TYPE cookie(s)
 (defcommand award (args)
    (setf args (mapcar #'stringify args))
-   (when (not (member src *owners* :test #'equalp)) 
-         (return-from award 
-            (whichever "as if you could award cookies" 
-                       (format nil "I'm sorry, I can't let you do that, ~a." src)
-                       (format nil "UNAUTHORIZED ACCESS DETECTED...~%LAUNCHING MISSILES"))))
-   (if (is-cookie? (nth-from-end 2 args)) 
-       (if (equalp (nth-from-end 1 args) "to")
-           (aif (number-designator? (first args))
-                (if (member (nth-from-end 0 args) *users* :test #'equalp)
-                    (let ((flavor (subseq args 1 (- (length args) 3))))
-                          (if flavor
-                              (award-cookies (nth-from-end 0 args) it (format nil fspaces flavor))
-                              "What kind of cookies?"))
-                    "Who?")
-                "How many cookies?")
-           "What do you want to do with those cookies?")
-       (if (is-cookie? (nth-from-end 0 args))
-           (aif (number-designator? (second args))
-                (if (member (first args) *users* :test #'equalp)
-                    (let ((flavor (subseq args 2 (- (length args) 1))))
-                          (if flavor
-                              (award-cookies (first args) it (format nil fspaces flavor))
-                              "What kind of cookies?"))
-                    "Who?")
-                "How many cookies?")
-           "What do you want to give?")))
+   (or (awhen (auth-user) (if (> (random 10) 7) it "as if you could award cookies"))
+       (destructuring-match :mode string args
+         (choice
+           ((quantifier amount) cookie-type (cookie) "to" (irc-user n))  
+           ((irc-user n) (quantifier amount) cookie-type (cookie)))     
+         (award-cookies n amount (format nil fspaces cookie-type)))
+       (incorrect-syntax)))
 
 (defcommand help (args)
    (if (not args)
@@ -263,7 +261,7 @@ rest out yourself."))
                    (let ((command (gethash (string-downcase (car form)) commands)))
                          (if (not command)
                              (format nil "I don't know the term '~a'" 
-										  (string-downcase (car form)))
+                                (string-downcase (car form)))
                              (funcall command (cdr form))))))))
 
 (defun msg-hook (message)
