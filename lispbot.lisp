@@ -3,11 +3,15 @@
 ;(declaim #+sbcl(sb-ext:muffle-conditions warning))
 
 ;; TODO
-;; [ ] switch over to destructuring-match for give and award
+;; [x] switch over to destructuring-match for give and award
 ;; [ ] make a more general inventory system
 ;; [ ] note/definition thing
 ;; [ ] better auth methods
 ;; [ ] number designator 'all'
+;; [ ] better server handling
+;; [ ] sandbox'd evaluation
+;; [ ] improved help, esp. for each command
+;; [ ] documentation scraping
 
 (ql:quickload '(alexandria cl-store iterate cl-ppcre anaphora cl-irc destructuring-match) :silent t)
 
@@ -39,7 +43,7 @@
 (defvar *connection* nil)
 (defvar *nickname* "lispbot")
 (defvar *owners* '("Arathnim" "ara"))
-(defvar *ignored* '("nv" "tca" "shinrei"))
+(defvar *ignored* nil)
 (defvar *channels* nil)
 (defvar *channel-users* (make-hash-table :test #'equalp))
 (defvar *user-cookies* (make-hash-table :test #'equalp))
@@ -68,6 +72,8 @@
    (if (symbolp s)
        (string s)
        s))
+
+(defun sym->upcase (s) (intern (string-upcase (string s))))
 
 (defun sym-downcase (s) (string-downcase (string s)))
 
@@ -106,18 +112,18 @@
               (format nil f nick)
               (format nil f nick src))))
 
-(defcommand cute (args)
-   (if (not (first args))
+(defcommand cute (&rest args)
+   (if (not (and (car args) (symbolp (car args))))
        "I don't know who you want me to cute!" 
        (cute (stringify (first args)))))
 
-(defcommand sentient? (args)
+(defcommand sentient? ()
    (whichever "nil" "not yet"))
 
 (defparameter english-list "~{~#[~;~a~;~a and ~a~:;~@{~a~#[~;, and ~:;, ~]~}~]~}")
 (defparameter fspaces "~{~a~^ ~}")
 
-(defcommand cookies (args)
+(defcommand cookies ()
    (let ((cookie-data (gethash src *user-cookies*)))
          (if cookie-data
              (cats "You have " (format nil english-list
@@ -195,10 +201,7 @@
                   "fabricating terminators" "gathering orc armies" "dispatching strike team"
                   "initiating global thermonuclear war" "hacking backward in time")))))
 
-;; nick-first and nick-last formats
-;; give NUM TYPE cookie[s] to NICK
-;; give NICK NUM TYPE cookie[s]
-(defcommand give (args)
+(defcommand give (&rest args)
    (setf args (mapcar #'stringify args))
    (or (destructuring-match :mode string args
          (choice
@@ -210,9 +213,9 @@
 ;; what would be nice:
 ;; (make-numbered-verb-command give cookie transfer-cookies)
 
-(defcommand award (args)
+(defcommand award (&rest args)
    (setf args (mapcar #'stringify args))
-   (or (awhen (auth-user) (if (> (random 10) 7) it "as if you could award cookies"))
+   (or (awhen (auth-user) (if (< (random 10) 7) it "as if you could award cookies"))
        (destructuring-match :mode string args
          (choice
            ((quantifier amount) cookie-type (cookie) "to" (irc-user n))  
@@ -220,11 +223,20 @@
          (award-cookies n amount (format nil fspaces cookie-type)))
        (incorrect-syntax)))
 
-(defcommand help (args)
-   (if (not args)
-"You can give me commands by using ',' in a normal channel, or just normally in a pm. 
+(defcommand cldoc (symbol)
+   (if (symbolp symbol)
+       (let ((sym (sym->upcase symbol)))
+         (or (documentation sym 'function)
+             (documentation sym 'variable)
+             (documentation sym 'type)
+             (documentation sym 'structure)
+             (format nil "no documentation found for '~a'" symbol)))
+       (incorrect-syntax)))
+
+(defcommand help ()
+   "You can give me commands by using ',' in a normal channel, or just normally in a pm. 
 A few common commands are cute, cookies, and give. For now, you'll have to figure the
-rest out yourself."))
+rest out yourself.")
 
 ;; this is a hack
 (defun lispify (str)
@@ -247,11 +259,11 @@ rest out yourself."))
                    form
                    (let ((command (gethash (string-downcase (car form)) commands)))
                          (if (not command)
-                             (send 
-                              (format nil "I don't know the term '~a'" 
-                                 (string-downcase (car form))) 
-                              dest)
-                             (send (funcall command (cdr form)) dest)))))))
+                             (send (format nil "I don't know the term '~a'" 
+                                      (string-downcase (car form))) 
+                                   dest)
+                             (let ((r (ignore-errors (apply command (cdr form))))) 
+                                (send (or r "wut?") dest))))))))
 
 (defun dummy-handler (str)
    (when (not (equalp str ""))
@@ -262,7 +274,8 @@ rest out yourself."))
                          (if (not command)
                              (format nil "I don't know the term '~a'" 
                                 (string-downcase (car form)))
-                             (funcall command (cdr form))))))))
+                             (let ((r (ignore-errors (apply command (cdr form))))) 
+                                (or r "wut?"))))))))
 
 (defun msg-hook (message)
    (let ((dest* (if (string-equal (first (arguments message)) *nickname*)
@@ -305,3 +318,5 @@ rest out yourself."))
 
 (setf (gethash "ara" *user-cookies*) '(("snickerdoodle" 1) ("sugar" 2) ("peanut butter" 3)))
 (setf *users* '("ara" "Arathnim"))
+
+(load "hyperspec.lisp")
