@@ -1,3 +1,6 @@
+;; This table is from SLIME, https://common-lisp.net/project/slime/, located at lib/hyperspec.el
+;; All credit should go to the original authors.
+
 (defparameter clhs-lookup 
       '(("&allow-other-keys" "03_da.htm")
         ("&aux" "03_da.htm")
