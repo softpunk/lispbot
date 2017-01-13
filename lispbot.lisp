@@ -18,8 +18,7 @@
 (ql:quickload '(alexandria cl-store iterate cl-ppcre anaphora cl-irc destructuring-match) :silent t)
 
 (defpackage lispbot
- (:use cl alexandria cl-store iterate cl-ppcre anaphora cl-irc destr-match)
- (:shadowing-import-from destr-match switch))
+ (:use cl alexandria cl-store iterate cl-ppcre anaphora cl-irc destr-match))
 (in-package lispbot)
 
 (setf *read-eval* nil)
@@ -282,10 +281,11 @@
 
 (defcommand give (&rest args)
    (setf args (mapcar #'stringify args))
-   (or (destructuring-match :mode string args
+   (or (bind
          (choice
            ((quantifier amount) cookie-type (cookie) "to" (irc-user n))  
-           ((irc-user n) (quantifier amount) cookie-type (cookie)))     
+           ((irc-user n) (quantifier amount) cookie-type (cookie))) 
+			args
          (transfer-cookies n amount (format nil fspaces cookie-type)))
        (incorrect-syntax)))
 
@@ -295,10 +295,11 @@
 (defcommand award (&rest args)
    (setf args (mapcar #'stringify args))
    (or (awhen (auth-user) (if (< (random 10) 7) it "as if you could award cookies"))
-       (destructuring-match :mode string args
+       (bind
          (choice
            ((quantifier amount) cookie-type (cookie) "to" (irc-user n))  
-           ((irc-user n) (quantifier amount) cookie-type (cookie)))     
+           ((irc-user n) (quantifier amount) cookie-type (cookie)))
+			args     
          (award-cookies n amount (format nil fspaces cookie-type)))
        (incorrect-syntax)))
 
@@ -346,5 +347,3 @@ rest out yourself.")
 
 (setf (gethash "ara" *user-cookies*) '(("snickerdoodle" 1) ("sugar" 2) ("peanut butter" 3)))
 (setf *users* '("ara" "Arathnim"))
-
-(load "hyperspec.lisp")
